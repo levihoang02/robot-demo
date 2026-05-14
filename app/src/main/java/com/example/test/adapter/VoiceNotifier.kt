@@ -9,6 +9,10 @@ class VoiceNotifier(context: Context) {
     private var tts: TextToSpeech? = null
     private var isReady = false
 
+    private var lastNotifyTime = 0L
+    private var lastStatus: RobotStatus? = null
+    private val NOTIFY_COOLDOWN_MS = 5000L
+
     init {
         try {
             tts = TextToSpeech(context) { status ->
@@ -31,17 +35,24 @@ class VoiceNotifier(context: Context) {
     fun notifyStatus(status: RobotStatus) {
         val tts = this.tts ?: return
         if (!isReady) return
+
+        val now = System.currentTimeMillis()
+        if (status == lastStatus && (now - lastNotifyTime) < NOTIFY_COOLDOWN_MS) {
+            return
+        }
         
         val message = when (status) {
             RobotStatus.MOVING -> "Tôi đang di chuyển đến điểm đích."
             RobotStatus.AVOIDING -> "Phát hiện vật cản. Đang điều chỉnh đường đi."
             RobotStatus.BLOCKED -> "Đường đi bị chặn. Vui lòng dọn dẹp lối đi."
-            RobotStatus.SLEEPING -> "Tôi đang đi ngủ đây."
             RobotStatus.IDLE -> "Tôi đã sẵn sàng và đang chờ lệnh."
             RobotStatus.GOAL_REACHED -> "Đã đến điểm đích."
+            else -> return
         }
         
         tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, null)
+        lastNotifyTime = now
+        lastStatus = status
     }
 
     fun shutdown() {
