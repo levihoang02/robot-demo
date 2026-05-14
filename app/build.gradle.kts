@@ -5,7 +5,7 @@ plugins {
 
 android {
 
-    namespace = "com.example.robotdemo"
+    namespace = "com.example.test"
 
     compileSdk {
         version = release(36) {
@@ -15,7 +15,7 @@ android {
 
     defaultConfig {
 
-        applicationId = "com.example.robotdemo"
+        applicationId = "com.example.test"
 
         minSdk = 24
 
