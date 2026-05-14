@@ -21,11 +21,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class AndroidSTTProvider(
-    private val context: Context
+    context: Context
 ) : SpeechToTextProvider {
+
+    private val appContext = context.applicationContext
 
     companion object {
 
@@ -38,7 +41,7 @@ class AndroidSTTProvider(
         /**
          * Ignore tiny noise
          */
-        private const val RMS_THRESHOLD = 5f
+        private const val RMS_THRESHOLD = 2f
 
         /**
          * Prevent timer spam
@@ -57,7 +60,10 @@ class AndroidSTTProvider(
 
     private var silenceJob: Job? = null
 
-    private var isListening = false
+    /**
+     * Refers to whether the SpeechRecognizer engine is actively running
+     */
+    private var isEngineRunning = false
 
     private var lastSpeechTimestamp = 0L
 
@@ -69,6 +75,12 @@ class AndroidSTTProvider(
 
     private var lastPartialTranscript: String? = null
 
+    /**
+     * Store the listener reference so it can be re-attached
+     * if the recognizer is recreated.
+     */
+    private var currentListener: RecognitionListener? = null
+
     private val _stateFlow =
         MutableStateFlow<STTState>(
             STTState.Idle
@@ -77,13 +89,32 @@ class AndroidSTTProvider(
     override val stateFlow =
         _stateFlow.asStateFlow()
 
-    init {
+    private fun ensureRecognizer(): SpeechRecognizer? {
+        if (!scope.isActive) {
+            Log.e(TAG, "ensureRecognizer: Provider scope is cancelled")
+            return null
+        }
+        
+        if (speechRecognizer == null) {
+            Log.d(TAG, "ensureRecognizer: Creating new SpeechRecognizer")
+            
+            if (!SpeechRecognizer.isRecognitionAvailable(appContext)) {
+                Log.e(TAG, "ensureRecognizer: Recognition not available")
+                return null
+            }
 
-        speechRecognizer =
-            SpeechRecognizer
-                .createSpeechRecognizer(
-                    context
-                )
+            try {
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(appContext)
+                currentListener?.let {
+                    Log.d(TAG, "ensureRecognizer: Re-attaching existing listener")
+                    speechRecognizer?.setRecognitionListener(it)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "ensureRecognizer: Failed to create", e)
+                return null
+            }
+        }
+        return speechRecognizer
     }
 
     override val transcriptFlow:
@@ -98,453 +129,207 @@ class AndroidSTTProvider(
                         params: Bundle?
                     ) {
 
-                        Log.d(
-                            TAG,
-                            "onReadyForSpeech"
-                        )
-
-                        _stateFlow.value =
-                            STTState.Listening
+                        Log.d(TAG, "onReadyForSpeech")
+                        isEngineRunning = true
+                        _stateFlow.value = STTState.Listening
 
                         startSilenceTimer {
-
-                            Log.d(
-                                TAG,
-                                "Silence timeout"
-                            )
-
-                            trySend(
-                                STTEvent.SilenceTimeout
-                            )
+                            Log.d(TAG, "Silence timeout triggered")
+                            trySend(STTEvent.SilenceTimeout)
                         }
                     }
 
                     override fun onBeginningOfSpeech() {
-
-                        Log.d(
-                            TAG,
-                            "onBeginningOfSpeech"
-                        )
-
+                        Log.d(TAG, "onBeginningOfSpeech")
                         resetSilenceTimer {
-
-                            Log.d(
-                                TAG,
-                                "Silence timeout"
-                            )
-
-                            trySend(
-                                STTEvent.SilenceTimeout
-                            )
+                            trySend(STTEvent.SilenceTimeout)
                         }
                     }
 
-                    override fun onRmsChanged(
-                        rmsdB: Float
-                    ) {
-                        val now =
-                            SystemClock.elapsedRealtime()
+                    override fun onRmsChanged(rmsdB: Float) {
+                        val now = SystemClock.elapsedRealtime()
+                        val passedDebounce = now - lastSpeechTimestamp > RMS_DEBOUNCE_MS
 
-                        val passedDebounce =
-                            now - lastSpeechTimestamp >
-                                    RMS_DEBOUNCE_MS
-
-                        if (
-                            rmsdB > RMS_THRESHOLD &&
-                            passedDebounce
-                        ) {
-                            Log.d(
-                                TAG,
-                                "Voice detected (RMS: $rmsdB)"
-                            )
-
+                        if (rmsdB > RMS_THRESHOLD && passedDebounce) {
+                            Log.v(TAG, "RMS: $rmsdB")
                             lastSpeechTimestamp = now
-
                             resetSilenceTimer {
-
-                                Log.d(
-                                    TAG,
-                                    "Silence timeout"
-                                )
-
-                                trySend(
-                                    STTEvent.SilenceTimeout
-                                )
+                                Log.d(TAG, "Silence timeout (RMS)")
+                                trySend(STTEvent.SilenceTimeout)
                             }
                         }
                     }
 
-                    override fun onBufferReceived(
-                        buffer: ByteArray?
-                    ) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
 
                     override fun onEndOfSpeech() {
-
-                        Log.d(
-                            TAG,
-                            "onEndOfSpeech"
-                        )
-
+                        Log.d(TAG, "onEndOfSpeech")
                         cancelSilenceTimer()
-
-                        _stateFlow.value =
-                            STTState.Processing
+                        _stateFlow.value = STTState.Processing
                     }
 
-                    override fun onPartialResults(
-                        partialResults: Bundle?
-                    ) {
-
+                    override fun onPartialResults(partialResults: Bundle?) {
                         hasRecognizedSpeech = true
-
-                        val partial =
-                            partialResults
-                                ?.getStringArrayList(
-                                    SpeechRecognizer.RESULTS_RECOGNITION
-                                )
-                                ?.firstOrNull()
+                        val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
 
                         if (!partial.isNullOrBlank()) {
                             lastPartialTranscript = partial
-                            Log.d(
-                                TAG,
-                                "Partial: $partial"
-                            )
+                            Log.d(TAG, "Partial: $partial")
                         }
 
                         resetSilenceTimer {
-
-                            Log.d(
-                                TAG,
-                                "Silence timeout"
-                            )
-
-                            trySend(
-                                STTEvent.SilenceTimeout
-                            )
+                            trySend(STTEvent.SilenceTimeout)
                         }
                     }
 
-                    override fun onResults(
-                        results: Bundle?
-                    ) {
-
+                    override fun onResults(results: Bundle?) {
+                        Log.d(TAG, "onResults")
                         cancelSilenceTimer()
-
+                        isEngineRunning = false
                         hasRecognizedSpeech = true
 
-                        var matches =
-                            results
-                                ?.getStringArrayList(
-                                    SpeechRecognizer.RESULTS_RECOGNITION
-                                )
+                        var matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
 
                         if (matches.isNullOrEmpty() && !lastPartialTranscript.isNullOrBlank()) {
-                            Log.d(TAG, "Final results null/empty, falling back to partial: $lastPartialTranscript")
+                            Log.d(TAG, "Results fallback to partial: $lastPartialTranscript")
                             matches = arrayListOf(lastPartialTranscript!!)
                         }
 
-                        Log.d(
-                            TAG,
-                            "Results: $matches"
-                        )
+                        Log.d(TAG, "Final Matches: $matches")
 
-                        if (matches.isNullOrEmpty()) {
-
-                            Log.w(
-                                TAG,
-                                "Empty final results"
-                            )
-
-                            isListening = false
-
-                            _stateFlow.value =
-                                STTState.Idle
-
-                            return
-                        }
-
-                        val text =
-                            matches.firstOrNull()
-
+                        val text = matches?.firstOrNull()
                         if (!text.isNullOrBlank()) {
-
-                            Log.d(
-                                TAG,
-                                "Final transcript: $text"
-                            )
-
-                            trySend(
-                                STTEvent.Transcript(
-                                    text
-                                )
-                            )
+                            trySend(STTEvent.Transcript(text))
                         }
 
-                        isListening = false
-
-                        _stateFlow.value =
-                            STTState.Idle
+                        _stateFlow.value = STTState.Idle
                     }
 
-                    override fun onError(
-                        error: Int
-                    ) {
-
+                    override fun onError(error: Int) {
                         cancelSilenceTimer()
+                        isEngineRunning = false
 
-                        isListening = false
+                        val message = errorMessage(error)
+                        Log.e(TAG, "STT Error [$error]: $message")
 
-                        val message =
-                            errorMessage(error)
+                        // Error 5 (Client) or 8 (Busy) often require recreation
+                        if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || 
+                            error == SpeechRecognizer.ERROR_CLIENT) {
+                            Log.w(TAG, "Recoverable critical error, clearing instance")
+                            speechRecognizer?.destroy()
+                            speechRecognizer = null
+                        }
 
-                        Log.e(
-                            TAG,
-                            "STT Error [$error]: $message"
-                        )
-
-                        trySend(
-                            STTEvent.Error(
-                                error,
-                                message
-                            )
-                        )
-
-                        _stateFlow.value =
-                            STTState.Error(
-                                code = error,
-                                message = message
-                            )
+                        trySend(STTEvent.Error(error, message))
+                        _stateFlow.value = STTState.Error(code = error, message = message)
                     }
 
-                    override fun onEvent(
-                        eventType: Int,
-                        params: Bundle?
-                    ) {}
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
                 }
 
-            speechRecognizer
-                ?.setRecognitionListener(
-                    listener
-                )
+            currentListener = listener
+            ensureRecognizer()?.setRecognitionListener(listener)
 
             awaitClose {
-
-                Log.d(
-                    TAG,
-                    "callbackFlow closed"
-                )
-
+                Log.d(TAG, "callbackFlow closed")
+                currentListener = null
                 cancelSilenceTimer()
             }
         }
             .buffer(1)
-            .flowOn(
-                Dispatchers.Main.immediate
-            )
+            .flowOn(Dispatchers.Main.immediate)
 
     override suspend fun startListening() {
+        Log.d(TAG, "startListening (isEngineRunning=$isEngineRunning)")
 
-        Log.d(
-            TAG,
-            "startListening"
-        )
-
-        if (isListening) {
-
-            Log.d(
-                TAG,
-                "Already listening"
-            )
-
-            return
+        if (isEngineRunning) {
+            Log.d(TAG, "Engine already running, stopping first...")
+            stopListening()
+            delay(200) // Give it a moment to stabilize
         }
 
-        val recognizer =
-            speechRecognizer ?: run {
-
-                Log.e(
-                    TAG,
-                    "SpeechRecognizer is null"
-                )
-
-                return
-            }
+        val recognizer = ensureRecognizer() ?: run {
+            Log.e(TAG, "startListening: Failed to get recognizer")
+            return
+        }
 
         hasRecognizedSpeech = false
         lastPartialTranscript = null
 
-        val intent =
-            Intent(
-                RecognizerIntent
-                    .ACTION_RECOGNIZE_SPEECH
-            ).apply {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            // Removed extra silence length params as they can be unstable across devices
+        }
 
-                putExtra(
-                    RecognizerIntent
-                        .EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent
-                        .LANGUAGE_MODEL_FREE_FORM
-                )
-
-                putExtra(
-                    RecognizerIntent
-                        .EXTRA_LANGUAGE,
-                    "vi-VN"
-                )
-
-                putExtra(
-                    RecognizerIntent
-                        .EXTRA_PARTIAL_RESULTS,
-                    true
-                )
-
-                /**
-                 * Android internal silence handling
-                 */
-                putExtra(
-                    RecognizerIntent
-                        .EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
-                    2000
-                )
-
-                putExtra(
-                    RecognizerIntent
-                        .EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
-                    1500
-                )
-            }
-
-        isListening = true
-
-        recognizer.startListening(intent)
+        try {
+            isEngineRunning = true
+            recognizer.startListening(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "startListening: Exception", e)
+            isEngineRunning = false
+        }
     }
 
     override suspend fun stopListening() {
-
-        Log.d(
-            TAG,
-            "stopListening"
-        )
-
+        Log.d(TAG, "stopListening")
         cancelSilenceTimer()
-
-        isListening = false
-
+        
+        // Use the underlying instance directly to avoid accidental recreation
         speechRecognizer?.stopListening()
-
-        _stateFlow.value =
-            STTState.Idle
+        // We don't set isEngineRunning = false here because we wait for onResults/onError
+        _stateFlow.value = STTState.Idle
     }
 
     override fun release() {
-
-        Log.d(
-            TAG,
-            "release"
-        )
-
+        Log.d(TAG, "release")
         cancelSilenceTimer()
-
         speechRecognizer?.destroy()
-
         speechRecognizer = null
-
+        currentListener = null
         scope.cancel()
     }
 
-    private fun startSilenceTimer(
-        onTimeout: suspend () -> Unit
-    ) {
-
+    private fun startSilenceTimer(onTimeout: suspend () -> Unit) {
         silenceJob?.cancel()
-
         silenceJob = scope.launch {
-
             delay(SILENCE_TIMEOUT_MS)
-
-            Log.d(
-                TAG,
-                "Timeout reached"
-            )
-
-            /**
-             * Ask recognizer to finalize
-             * current speech
-             */
+            Log.d(TAG, "Silence timer reached")
+            
+            // Finalize current speech
             speechRecognizer?.stopListening()
-
-            /**
-             * Wait final result callback
-             */
             delay(FINAL_RESULT_WAIT_MS)
 
-            /**
-             * Truly no speech
-             */
             if (!hasRecognizedSpeech) {
-
-                Log.d(
-                    TAG,
-                    "No speech recognized"
-                )
-
-                isListening = false
-
+                Log.d(TAG, "Timer: No speech recognized, finalizing...")
+                isEngineRunning = false
                 onTimeout()
             }
         }
     }
 
-    private fun resetSilenceTimer(
-        onTimeout: suspend () -> Unit
-    ) {
-
+    private fun resetSilenceTimer(onTimeout: suspend () -> Unit) {
         startSilenceTimer(onTimeout)
     }
 
     private fun cancelSilenceTimer() {
-
         silenceJob?.cancel()
-
         silenceJob = null
     }
 
-    private fun errorMessage(
-        code: Int
-    ): String {
-
+    private fun errorMessage(code: Int): String {
         return when (code) {
-
-            SpeechRecognizer.ERROR_AUDIO ->
-                "Audio recording error"
-
-            SpeechRecognizer.ERROR_CLIENT ->
-                "Client error"
-
-            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
-                "Permission denied"
-
-            SpeechRecognizer.ERROR_NETWORK ->
-                "Network error"
-
-            SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
-                "Network timeout"
-
-            SpeechRecognizer.ERROR_NO_MATCH ->
-                "No speech match"
-
-            SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
-                "Recognizer busy"
-
-            SpeechRecognizer.ERROR_SERVER ->
-                "Server error"
-
-            SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
-                "Speech timeout"
-
-            else ->
-                "Unknown error"
+            SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
+            SpeechRecognizer.ERROR_CLIENT -> "Client error"
+            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Permission denied"
+            SpeechRecognizer.ERROR_NETWORK -> "Network error"
+            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
+            SpeechRecognizer.ERROR_NO_MATCH -> "No speech match"
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognizer busy"
+            SpeechRecognizer.ERROR_SERVER -> "Server error"
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Speech timeout"
+            else -> "Unknown error"
         }
     }
 }

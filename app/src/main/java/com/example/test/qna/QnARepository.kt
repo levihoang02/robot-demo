@@ -53,6 +53,8 @@ object QnARepository {
     }
 
     fun closeAssistant() {
-        assistantManager?.closeAssistant()
+        scope.launch {
+            assistantManager?.closeAssistant()
+        }
     }
 }
