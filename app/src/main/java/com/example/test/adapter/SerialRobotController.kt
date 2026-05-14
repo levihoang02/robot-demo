@@ -35,6 +35,8 @@ class SerialRobotController(
 
     private var goalReachedJob: Job? = null
 
+    private var statusUpdateJob: Job? = null
+
     // =========================
     // State
     // =========================
@@ -381,13 +383,19 @@ class SerialRobotController(
     private fun updateRobotStatus(
         status: RobotStatus
     ) {
+        if (_robotStatus.value == status) return
+
+        statusUpdateJob?.cancel()
+        statusUpdateJob = controllerScope.launch {
+            // Wait 2s to ensure the status is stable
+            delay(2000)
+            _robotStatus.value = status
+        }
 
         Log.d(
             TAG,
             "RobotStatus -> $status"
         )
-
-        _robotStatus.value = status
     }
 
     private fun updateUartState(

@@ -11,14 +11,18 @@ class VoiceNotifier(context: Context) {
 
     private var lastNotifyTime = 0L
     private var lastStatus: RobotStatus? = null
-    private val NOTIFY_COOLDOWN_MS = 5000L
+    companion object {
+        private const val NOTIFY_COOLDOWN_MS = 3000L
+    }
 
     init {
         try {
             tts = TextToSpeech(context) { status ->
                 if (status == TextToSpeech.SUCCESS) {
                     // Set language to Vietnamese
-                    val result = tts?.setLanguage(Locale("vi", "VN"))
+                    val result = tts?.setLanguage(
+                        Locale.forLanguageTag("vi-VN")
+                    )
                     if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                         // Fallback to US English if Vietnamese is not installed on the tablet
                         tts?.language = Locale.US
