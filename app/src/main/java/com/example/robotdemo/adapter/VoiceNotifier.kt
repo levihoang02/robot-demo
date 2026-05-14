@@ -13,7 +13,12 @@ class VoiceNotifier(context: Context) {
         try {
             tts = TextToSpeech(context) { status ->
                 if (status == TextToSpeech.SUCCESS) {
-                    tts?.language = Locale.US
+                    // Set language to Vietnamese
+                    val result = tts?.setLanguage(Locale("vi", "VN"))
+                    if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        // Fallback to US English if Vietnamese is not installed on the tablet
+                        tts?.language = Locale.US
+                    }
                     isReady = true
                 }
             }
@@ -28,11 +33,12 @@ class VoiceNotifier(context: Context) {
         if (!isReady) return
         
         val message = when (status) {
-            RobotStatus.MOVING -> "I am moving to the destination."
-            RobotStatus.AVOIDING -> "Obstacle detected. Adjusting my path."
-            RobotStatus.BLOCKED -> "I am blocked. Please clear the way."
-            RobotStatus.SLEEPING -> "I am going to sleep now."
-            RobotStatus.IDLE -> "I am ready and waiting."
+            RobotStatus.MOVING -> "Tôi đang di chuyển đến điểm đích."
+            RobotStatus.AVOIDING -> "Phát hiện vật cản. Đang điều chỉnh đường đi."
+            RobotStatus.BLOCKED -> "Đường đi bị chặn. Vui lòng dọn dẹp lối đi."
+            RobotStatus.SLEEPING -> "Tôi đang đi ngủ đây."
+            RobotStatus.IDLE -> "Tôi đã sẵn sàng và đang chờ lệnh."
+            RobotStatus.GOAL_REACHED -> "Đã đến điểm đích."
         }
         
         tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, null)

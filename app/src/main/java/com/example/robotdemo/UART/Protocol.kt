@@ -25,4 +25,8 @@ object Protocol {
     const val TARGET_1 = 1
     const val TARGET_2 = 2
     const val TARGET_3 = 3
+
+    const val TARGET_4 = 4
+
+    const val TARGET_5 = 5
 }

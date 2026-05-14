@@ -5,7 +5,8 @@ enum class RobotStatus {
     MOVING,
     AVOIDING,
     BLOCKED,
-    SLEEPING
+    SLEEPING,
+    GOAL_REACHED,
 }
 
 data class RobotState(

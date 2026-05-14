@@ -23,6 +23,8 @@ class RobotViewModel : ViewModel() {
             NavigationPoint("1", "A", Protocol.TARGET_1),
             NavigationPoint("2", "B", Protocol.TARGET_2),
             NavigationPoint("3", "C", Protocol.TARGET_3),
+            NavigationPoint("4", "D", Protocol.TARGET_4),
+            NavigationPoint("5", "E", Protocol.TARGET_5),
         )
     )
     val navigationPoints: StateFlow<List<NavigationPoint>> = _navigationPoints.asStateFlow()

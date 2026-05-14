@@ -10,11 +10,24 @@ import androidx.compose.ui.Modifier
 import com.example.robotdemo.ui.RobotScreen
 import com.example.robotdemo.ui.theme.RobotDemoTheme
 import com.example.robotdemo.data.RobotRepository
+import com.example.robotdemo.qna.QnARepository
+import android.Manifest
+import androidx.activity.result.contract.ActivityResultContracts
 
 class MainActivity : ComponentActivity() {
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            QnARepository.initialize(this)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         RobotRepository.initialize(this)
+        requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+
         setContent {
             RobotDemoTheme {
                 Surface(

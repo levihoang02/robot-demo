@@ -1,6 +1,7 @@
 package com.example.robotdemo.adapter
 
 import android.content.Context
+import android.util.Log
 import com.example.robotdemo.UART.Packet
 import com.example.robotdemo.UART.PacketListener
 import com.example.robotdemo.UART.Protocol
@@ -8,16 +9,35 @@ import com.example.robotdemo.UART.SerialState
 import com.example.robotdemo.UART.UsbSerialManager
 import com.example.robotdemo.domain.NavigationPoint
 import com.example.robotdemo.domain.RobotStatus
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 
-import android.util.Log
-
 class SerialRobotController(
     context: Context
 ) : RobotController {
+
+    companion object {
+        private const val TAG = "UART_DEBUG"
+        private const val GOAL_REACHED_DELAY_MS = 2000L
+    }
+
+    // =========================
+    // Coroutine
+    // =========================
+
+    private val controllerScope =
+        CoroutineScope(
+            SupervisorJob() + Dispatchers.Main
+        )
+
+    private var goalReachedJob: Job? = null
+
+    // =========================
+    // State
+    // =========================
 
     private val _uartState =
         MutableStateFlow<SerialState>(
@@ -28,7 +48,6 @@ class SerialRobotController(
         _uartState.asStateFlow()
 
     private val _robotStatus =
-
         MutableStateFlow(
             RobotStatus.IDLE
         )
@@ -37,41 +56,115 @@ class SerialRobotController(
             StateFlow<RobotStatus> =
         _robotStatus.asStateFlow()
 
-    init {
-        Log.d("UART_DEBUG", "SerialRobotController init")
+    // Ignore packets during cooldown
+    private var ignoreUntil = 0L
 
-        _uartState.value =
+    // =========================
+    // Init
+    // =========================
+
+    init {
+
+        initUsb(context)
+
+        setupListener()
+
+        Log.d(TAG, "Calling connect()")
+
+        UsbSerialManager.connect()
+    }
+
+    // =========================
+    // Public API
+    // =========================
+
+    override fun sendTargetCoordinates(
+        point: NavigationPoint
+    ) {
+
+        Log.d(
+            TAG,
+            "Sending target: ${point.value}"
+        )
+
+        UsbSerialManager.sendPacket(
+            Protocol.HEADER_TARGET,
+            point.value
+        )
+
+        updateRobotStatus(
+            RobotStatus.MOVING
+        )
+    }
+
+    override fun onStatusMessageReceived(
+        status: RobotStatus
+    ) {
+
+        updateRobotStatus(status)
+    }
+
+    override fun stop() {
+
+        Log.d(TAG, "Stopping controller")
+
+        goalReachedJob?.cancel()
+
+        controllerScope.cancel()
+
+        UsbSerialManager.disconnect()
+
+        updateRobotStatus(
+            RobotStatus.IDLE
+        )
+    }
+
+    // =========================
+    // USB Setup
+    // =========================
+
+    private fun initUsb(
+        context: Context
+    ) {
+
+        Log.d(TAG, "SerialRobotController init")
+
+        updateUartState(
             SerialState.Connecting
+        )
 
         try {
 
-            Log.d("UART_DEBUG", "Initializing USB")
+            Log.d(TAG, "Initializing USB")
 
-            UsbSerialManager.initialize(context)
+            UsbSerialManager.initialize(
+                context
+            )
 
-            Log.d("UART_DEBUG", "USB initialized")
+            Log.d(TAG, "USB initialized")
 
-            _uartState.value =
+            updateUartState(
                 SerialState.Connected
-
-            Log.d(
-                "UART_DEBUG",
-                "State manually set CONNECTED"
             )
 
         } catch (e: Exception) {
 
             Log.e(
-                "UART_DEBUG",
+                TAG,
                 "UART init failed",
                 e
             )
 
-            _uartState.value =
+            updateUartState(
                 SerialState.Error(
-                    e.message ?: "UART init failed"
+                    e.message
+                        ?: "UART init failed"
                 )
+            )
         }
+    }
+
+    private fun setupListener() {
 
         UsbSerialManager.setListener(
 
@@ -80,39 +173,40 @@ class SerialRobotController(
                 override fun onConnected() {
 
                     Log.d(
-                        "UART_DEBUG",
+                        TAG,
                         "onConnected callback"
                     )
 
-                    _uartState.value =
+                    updateUartState(
                         SerialState.Connected
+                    )
                 }
 
                 override fun onDisconnected() {
 
                     Log.d(
-                        "UART_DEBUG",
+                        TAG,
                         "onDisconnected callback"
                     )
 
-                    _uartState.value =
+                    updateUartState(
                         SerialState.Idle
+                    )
                 }
 
                 override fun onPacketReceived(
                     packet: Packet
                 ) {
 
-                    parseRobotPacket(
-                        packet
-                    )
+                    parseRobotPacket(packet)
                 }
 
                 override fun onJsonReceived(
                     json: JSONObject
                 ) {
 
-                    println(
+                    Log.d(
+                        TAG,
                         json.toString(4)
                     )
                 }
@@ -120,13 +214,18 @@ class SerialRobotController(
                 override fun onRawReceived(
                     bytes: ByteArray
                 ) {
+                    // Optional raw debug
                 }
 
                 override fun onError(
                     throwable: Throwable
                 ) {
 
-                    throwable.printStackTrace()
+                    Log.e(
+                        TAG,
+                        "UART Error",
+                        throwable
+                    )
                 }
 
                 override fun onStateChanged(
@@ -134,129 +233,172 @@ class SerialRobotController(
                 ) {
 
                     Log.d(
-                        "UART_DEBUG",
+                        TAG,
                         "onStateChanged: $state"
                     )
 
-                    _uartState.value = state
+                    updateUartState(state)
                 }
             }
         )
-        Log.d(
-            "UART_DEBUG",
-            "Calling connect()"
-        )
-        UsbSerialManager.connect()
     }
 
-    override fun sendTargetCoordinates(
-        point: NavigationPoint
-    ) {
-
-        val target =
-            when (point.name) {
-
-                "HOME" ->
-                    Protocol.TARGET_HOME
-
-                "TARGET_1" ->
-                    Protocol.TARGET_1
-
-                "TARGET_2" ->
-                    Protocol.TARGET_2
-
-                "TARGET_3" ->
-                    Protocol.TARGET_3
-
-                else ->
-                    Protocol.TARGET_HOME
-            }
-
-        UsbSerialManager.sendPacket(
-
-            Protocol.HEADER_TARGET,
-
-            target
-        )
-
-        _robotStatus.value =
-            RobotStatus.MOVING
-    }
+    // =========================
+    // Packet Parser
+    // =========================
 
     private fun parseRobotPacket(
         packet: Packet
     ) {
 
+        if (shouldIgnorePacket()) {
+
+            Log.d(
+                TAG,
+                "Packet ignored during cooldown"
+            )
+
+            return
+        }
+
         when (packet.header) {
 
             Protocol.HEADER_CONTROLLER -> {
 
-                when (
+                handleControllerPacket(
                     packet.enumValue
-                ) {
-
-                    Protocol.CONTROLLER_RECEIVED_GOAL -> {
-
-                        println(
-                            "Robot received goal"
-                        )
-                    }
-
-                    Protocol.CONTROLLER_NEW_PATH -> {
-
-                        _robotStatus.value =
-                            RobotStatus.MOVING
-                    }
-
-                    Protocol.CONTROLLER_REACHED_GOAL -> {
-
-                        _robotStatus.value =
-                            RobotStatus.IDLE
-                    }
-                }
+                )
             }
 
             Protocol.HEADER_COLLISION -> {
 
-                when (
+                handleCollisionPacket(
                     packet.enumValue
-                ) {
-
-                    Protocol.COLLISION_NORMAL -> {
-
-                        _robotStatus.value =
-                            RobotStatus.MOVING
-                    }
-
-                    Protocol.COLLISION_SLOWDOWN -> {
-
-                        _robotStatus.value =
-                            RobotStatus.AVOIDING
-                    }
-
-                    Protocol.COLLISION_STOP -> {
-
-                        _robotStatus.value =
-                            RobotStatus.BLOCKED
-                    }
-                }
+                )
             }
         }
     }
 
-    override fun onStatusMessageReceived(
+    private fun handleControllerPacket(
+        enumValue: Int
+    ) {
+
+        when (enumValue) {
+
+            Protocol.CONTROLLER_RECEIVED_GOAL -> {
+
+                Log.d(
+                    TAG,
+                    "Goal received"
+                )
+            }
+
+            Protocol.CONTROLLER_NEW_PATH -> {
+
+                updateRobotStatus(
+                    RobotStatus.MOVING
+                )
+            }
+
+            Protocol.CONTROLLER_REACHED_GOAL -> {
+
+                handleGoalReached()
+            }
+        }
+    }
+
+    private fun handleCollisionPacket(
+        enumValue: Int
+    ) {
+
+        when (enumValue) {
+
+            Protocol.COLLISION_NORMAL -> {
+
+                updateRobotStatus(
+                    RobotStatus.MOVING
+                )
+            }
+
+            Protocol.COLLISION_SLOWDOWN -> {
+
+                updateRobotStatus(
+                    RobotStatus.AVOIDING
+                )
+            }
+
+            Protocol.COLLISION_STOP -> {
+
+                updateRobotStatus(
+                    RobotStatus.BLOCKED
+                )
+            }
+        }
+    }
+
+    // =========================
+    // Goal Logic
+    // =========================
+
+    private fun handleGoalReached() {
+
+        Log.d(TAG, "Goal reached")
+
+        ignoreUntil =
+            System.currentTimeMillis() +
+                    GOAL_REACHED_DELAY_MS
+
+        goalReachedJob?.cancel()
+
+        goalReachedJob =
+            controllerScope.launch {
+
+                updateRobotStatus(
+                    RobotStatus.GOAL_REACHED
+                )
+
+                delay(
+                    GOAL_REACHED_DELAY_MS
+                )
+
+                updateRobotStatus(
+                    RobotStatus.IDLE
+                )
+            }
+    }
+
+    private fun shouldIgnorePacket():
+            Boolean {
+
+        return System.currentTimeMillis() <
+                ignoreUntil
+    }
+
+    // =========================
+    // Helpers
+    // =========================
+
+    private fun updateRobotStatus(
         status: RobotStatus
     ) {
+
+        Log.d(
+            TAG,
+            "RobotStatus -> $status"
+        )
 
         _robotStatus.value = status
     }
 
+    private fun updateUartState(
+        state: SerialState
+    ) {
 
-    override fun stop() {
+        Log.d(
+            TAG,
+            "UART State -> $state"
+        )
 
-        UsbSerialManager.disconnect()
-
-        _robotStatus.value =
-            RobotStatus.IDLE
+        _uartState.value = state
     }
 }
