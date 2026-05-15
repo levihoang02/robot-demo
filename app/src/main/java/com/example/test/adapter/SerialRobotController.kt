@@ -112,13 +112,11 @@ class SerialRobotController(
 
         goalReachedJob?.cancel()
 
-        controllerScope.cancel()
+        updateRobotStatus(RobotStatus.IDLE)
 
         UsbSerialManager.disconnect()
 
-        updateRobotStatus(
-            RobotStatus.IDLE
-        )
+        controllerScope.cancel()
     }
 
     // =========================
@@ -380,22 +378,19 @@ class SerialRobotController(
     // Helpers
     // =========================
 
-    private fun updateRobotStatus(
-        status: RobotStatus
-    ) {
+    private fun updateRobotStatus(status: RobotStatus) {
         if (_robotStatus.value == status) return
 
-        statusUpdateJob?.cancel()
-        statusUpdateJob = controllerScope.launch {
-            // Wait 2s to ensure the status is stable
-            delay(2000)
-            _robotStatus.value = status
-        }
+        val current = _robotStatus.value
 
-        Log.d(
-            TAG,
-            "RobotStatus -> $status"
-        )
+        // ignore spam MOVING
+        if (status == RobotStatus.MOVING &&
+            current == RobotStatus.MOVING
+        ) return
+
+        _robotStatus.value = status
+
+        Log.d(TAG, "RobotStatus -> $status")
     }
 
     private fun updateUartState(

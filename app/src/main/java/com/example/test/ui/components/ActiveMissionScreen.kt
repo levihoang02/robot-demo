@@ -29,16 +29,23 @@ fun ActiveMissionScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = robotStatus.name,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 32.sp,
-                    textAlign = TextAlign.Center
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxSize()
+            ) {
+
+                RobotLottieAnimation(
+                    status = robotStatus,
+                    modifier = modifier.fillMaxSize()
                 )
-                
-                RobotLottieAnimation(robotStatus, modifier = Modifier.fillMaxSize(0.7f))
+
+//                Text(
+//                    text = robotStatus.name,
+//                    color = Color.White,
+//                    fontWeight = FontWeight.Bold,
+//                    fontSize = 32.sp,
+//                    textAlign = TextAlign.Center
+//                )
             }
             
             if (robotStatus == RobotStatus.BLOCKED) {

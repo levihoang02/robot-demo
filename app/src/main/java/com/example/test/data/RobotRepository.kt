@@ -16,8 +16,7 @@ object RobotRepository {
             RobotController
         private set
 
-    lateinit var robotStatus:
-            StateFlow<RobotStatus>
+    lateinit var robotStatus: StateFlow<RobotStatus>
         private set
 
     lateinit var uartState: StateFlow<SerialState>
