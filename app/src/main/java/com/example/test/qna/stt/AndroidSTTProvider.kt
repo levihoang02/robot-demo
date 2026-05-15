@@ -141,6 +141,7 @@ class AndroidSTTProvider(
 
                     override fun onBeginningOfSpeech() {
                         Log.d(TAG, "onBeginningOfSpeech")
+                        isEngineRunning = true // Ensure this is set
                         resetSilenceTimer {
                             trySend(STTEvent.SilenceTimeout)
                         }
@@ -260,7 +261,6 @@ class AndroidSTTProvider(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            // Removed extra silence length params as they can be unstable across devices
         }
 
         try {
@@ -273,12 +273,13 @@ class AndroidSTTProvider(
     }
 
     override suspend fun stopListening() {
-        Log.d(TAG, "stopListening")
+        Log.d(TAG, "stopListening (isEngineRunning=$isEngineRunning)")
         cancelSilenceTimer()
         
-        // Use the underlying instance directly to avoid accidental recreation
-        speechRecognizer?.stopListening()
-        // We don't set isEngineRunning = false here because we wait for onResults/onError
+        if (isEngineRunning) {
+            speechRecognizer?.stopListening()
+            isEngineRunning = false
+        }
         _stateFlow.value = STTState.Idle
     }
 
@@ -295,11 +296,12 @@ class AndroidSTTProvider(
         silenceJob?.cancel()
         silenceJob = scope.launch {
             delay(SILENCE_TIMEOUT_MS)
-            Log.d(TAG, "Silence timer reached")
             
-            // Finalize current speech
-            speechRecognizer?.stopListening()
-            delay(FINAL_RESULT_WAIT_MS)
+            if (isEngineRunning) {
+                Log.d(TAG, "Silence timer reached, stopping recognizer")
+                speechRecognizer?.stopListening()
+                delay(FINAL_RESULT_WAIT_MS)
+            }
 
             if (!hasRecognizedSpeech) {
                 Log.d(TAG, "Timer: No speech recognized, finalizing...")

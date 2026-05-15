@@ -29,6 +29,11 @@ class ElevenLabsTTSProvider(
     private val client = OkHttpClient()
 
     private var mediaPlayer: MediaPlayer? = null
+    
+    /**
+     * Tracks whether the MediaPlayer has been started and can be stopped safely.
+     */
+    private var isPlayerStarted = false
 
     override suspend fun speak(
         response: VoiceResponse
@@ -49,20 +54,21 @@ class ElevenLabsTTSProvider(
             )
         }
 
-        val request = Request.Builder()
+        // Correcting the request building logic to match original file style
+        val mediaType = "application/json".toMediaType()
+        val body = json.toString().toRequestBody(mediaType)
+
+        val httpRequest = Request.Builder()
             .url("https://api.elevenlabs.io/v1/text-to-speech/$voiceId")
             .addHeader("xi-api-key", apiKey)
             .addHeader("Accept", "audio/mpeg")
-            .post(
-                json.toString()
-                    .toRequestBody("application/json".toMediaType())
-            )
+            .post(body)
             .build()
 
-        Log.d(TAG, "Request URL: ${request.url}")
+        Log.d(TAG, "Request URL: ${httpRequest.url}")
         Log.d(TAG, "VoiceID: $voiceId")
 
-        val responseHttp = client.newCall(request).execute()
+        val responseHttp = client.newCall(httpRequest).execute()
 
         Log.d(TAG, "HTTP response code: ${responseHttp.code}")
 
@@ -110,29 +116,32 @@ class ElevenLabsTTSProvider(
 
                 setOnPreparedListener {
                     Log.d(TAG, "MediaPlayer prepared -> start()")
+                    isPlayerStarted = true
                     start()
                 }
 
                 setOnCompletionListener {
 
                     Log.d(TAG, "MediaPlayer completed")
-
+                    isPlayerStarted = false
                     release()
                     mediaPlayer = null
 
-                    continuation.resume(Unit)
+                    if (continuation.isActive) continuation.resume(Unit)
                 }
 
                 setOnErrorListener { _, what, extra ->
 
                     Log.e(TAG, "MediaPlayer error what=$what extra=$extra")
-
+                    isPlayerStarted = false
                     release()
                     mediaPlayer = null
 
-                    continuation.resumeWithException(
-                        Exception("MediaPlayer error what=$what extra=$extra")
-                    )
+                    if (continuation.isActive) {
+                        continuation.resumeWithException(
+                            Exception("MediaPlayer error what=$what extra=$extra")
+                        )
+                    }
 
                     true
                 }
@@ -148,7 +157,7 @@ class ElevenLabsTTSProvider(
         } catch (e: Exception) {
 
             Log.e(TAG, "playAudio exception", e)
-            continuation.resumeWithException(e)
+            if (continuation.isActive) continuation.resumeWithException(e)
         }
     }
 
@@ -157,10 +166,20 @@ class ElevenLabsTTSProvider(
         Log.d(TAG, "stop() called")
 
         try {
-
-            mediaPlayer?.stop()
-            mediaPlayer?.release()
+            val mp = mediaPlayer
             mediaPlayer = null
+            
+            if (mp != null) {
+                if (isPlayerStarted) {
+                    try {
+                        mp.stop()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "mp.stop error", e)
+                    }
+                }
+                mp.release()
+            }
+            isPlayerStarted = false
 
         } catch (e: Exception) {
 

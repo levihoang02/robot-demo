@@ -2,6 +2,7 @@ package com.example.test.qna
 
 import android.content.Context
 import com.example.test.qna.llm.OpenAIProvider
+import com.example.test.qna.llm.GeminiProvider
 import com.example.test.qna.stt.AndroidSTTProvider
 import com.example.test.qna.tts.AndroidTTSProvider
 import com.example.test.qna.tts.ElevenLabsTTSProvider
@@ -25,7 +26,7 @@ object QnARepository {
         
         val stt = AndroidSTTProvider(context)
         val tts = ElevenLabsTTSProvider(context, "", "hsndbHLHBSEcuDiMW1O9")
-        val llm = OpenAIProvider()
+        val llm = GeminiProvider("")
         
         val manager = VoiceAssistantManager(stt, llm, tts)
         assistantManager = manager
