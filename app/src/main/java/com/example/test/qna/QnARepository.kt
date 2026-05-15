@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.test.qna.llm.OpenAIProvider
 import com.example.test.qna.stt.AndroidSTTProvider
 import com.example.test.qna.tts.AndroidTTSProvider
+import com.example.test.qna.tts.ElevenLabsTTSProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,7 +24,7 @@ object QnARepository {
         if (assistantManager != null) return
         
         val stt = AndroidSTTProvider(context)
-        val tts = AndroidTTSProvider(context)
+        val tts = ElevenLabsTTSProvider(context, "", "hsndbHLHBSEcuDiMW1O9")
         val llm = OpenAIProvider()
         
         val manager = VoiceAssistantManager(stt, llm, tts)

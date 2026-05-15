@@ -27,6 +27,12 @@ android {
 
         testInstrumentationRunner =
             "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField(
+            "String",
+            "ELEVENLABS_API_KEY",
+            "\"sk_fbb622d64d5baa0d32a997c0f309a3bbf2c41c628ac93713\""
+        )
     }
 
     buildTypes {
@@ -45,7 +51,7 @@ android {
     }
 
     buildFeatures {
-
+        buildConfig = true
         compose = true
     }
 
@@ -118,4 +124,6 @@ dependencies {
     androidTestImplementation(
         libs.androidx.junit
     )
+
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
