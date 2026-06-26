@@ -1,4 +1,4 @@
-package com.example.test.qna.llm
+package com.example.test.language.llm
 
 import com.example.test.qna.domain.VoiceRequest
 import com.example.test.qna.domain.VoiceResponse

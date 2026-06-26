@@ -2,16 +2,13 @@ package com.example.test.adapter
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
+import android.util.Log
 import com.example.test.domain.RobotStatus
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import java.util.Locale
 
 class VoiceNotifier(context: Context) {
+
     private var tts: TextToSpeech? = null
     private var isReady = false
 
@@ -20,38 +17,56 @@ class VoiceNotifier(context: Context) {
 
     private var speakJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
     companion object {
+        private const val TAG = "VoiceNotifier"
         private const val NOTIFY_COOLDOWN_MS = 3000L
     }
 
     init {
         try {
+            Log.d(TAG, "Init TTS...")
+
             tts = TextToSpeech(context) { status ->
+                Log.d(TAG, "TTS init callback status=$status")
+
                 if (status == TextToSpeech.SUCCESS) {
-                    // Set language to Vietnamese
-                    val result = tts?.setLanguage(
-                        Locale.forLanguageTag("vi-VN")
-                    )
-                    if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        // Fallback to US English if Vietnamese is not installed on the tablet
+                    val result = tts?.setLanguage(Locale.forLanguageTag("vi-VN"))
+
+                    Log.d(TAG, "Set language result=$result")
+
+                    if (result == TextToSpeech.LANG_MISSING_DATA ||
+                        result == TextToSpeech.LANG_NOT_SUPPORTED
+                    ) {
+                        Log.w(TAG, "Vietnamese not supported, fallback to US")
                         tts?.language = Locale.US
+
+
+
                     }
+
                     isReady = true
+                    Log.d(TAG, "TTS ready = true")
+                } else {
+                    Log.e(TAG, "TTS init failed status=$status")
                 }
             }
+
         } catch (e: Exception) {
-            // TextToSpeech might not be available in all environments (like Previews)
-            e.printStackTrace()
+            Log.e(TAG, "TTS exception", e)
         }
     }
 
     fun notifyStatus(status: RobotStatus) {
 
+        Log.d(TAG, "notifyStatus: $status")
+
         val tts = this.tts ?: return
         if (!isReady) return
 
-        // 1. filter low priority spam
         if (!shouldSpeak(status)) return
+
+        val now = System.currentTimeMillis()
 
         speakJob?.cancel()
 
@@ -59,31 +74,45 @@ class VoiceNotifier(context: Context) {
 
             delay(500)
 
-            // confirm state still same
-            if (status != lastStatus) return@launch
-
-            val now = System.currentTimeMillis()
-
-            if (now - lastNotifyTime < NOTIFY_COOLDOWN_MS) return@launch
+            // ❌ chỉ check cooldown, KHÔNG check status khác
+            if (System.currentTimeMillis() - lastNotifyTime < NOTIFY_COOLDOWN_MS) {
+                Log.d(TAG, "Cooldown skip: $status")
+                return@launch
+            }
 
             val message = getMessage(status)
 
-            tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, null)
+            if (message.isBlank()) {
+                Log.w(TAG, "Empty message for $status")
+                return@launch
+            }
 
-            lastNotifyTime = now
+            Log.d(TAG, "SPEAK -> $status : $message")
+
+            tts.speak(
+                message,
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "voice_${status.name}"
+            )
+
             lastStatus = status
+            lastNotifyTime = System.currentTimeMillis()
         }
     }
 
     private fun shouldSpeak(status: RobotStatus): Boolean {
-        return when (status) {
+        val result = when (status) {
             RobotStatus.BLOCKED -> true
             RobotStatus.GOAL_REACHED -> true
             RobotStatus.AVOIDING -> true
-            RobotStatus.MOVING -> false
+            RobotStatus.MOVING -> true
             RobotStatus.IDLE -> true
             else -> false
         }
+
+        Log.d(TAG, "shouldSpeak($status) = $result")
+        return result
     }
 
     private fun getMessage(status: RobotStatus): String {
@@ -98,11 +127,15 @@ class VoiceNotifier(context: Context) {
     }
 
     fun shutdown() {
+        Log.d(TAG, "shutdown called")
+
         try {
+            speakJob?.cancel()
             tts?.stop()
             tts?.shutdown()
+            Log.d(TAG, "TTS shutdown complete")
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "shutdown error", e)
         }
     }
 }

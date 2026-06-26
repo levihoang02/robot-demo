@@ -1,4 +1,4 @@
-package com.example.test.qna.stt
+package com.example.test.language.stt
 
 import android.content.Context
 import android.content.Intent
@@ -94,10 +94,10 @@ class AndroidSTTProvider(
             Log.e(TAG, "ensureRecognizer: Provider scope is cancelled")
             return null
         }
-        
+
         if (speechRecognizer == null) {
             Log.d(TAG, "ensureRecognizer: Creating new SpeechRecognizer")
-            
+
             if (!SpeechRecognizer.isRecognitionAvailable(appContext)) {
                 Log.e(TAG, "ensureRecognizer: Recognition not available")
                 return null
@@ -214,7 +214,7 @@ class AndroidSTTProvider(
                         Log.e(TAG, "STT Error [$error]: $message")
 
                         // Error 5 (Client) or 8 (Busy) often require recreation
-                        if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || 
+                        if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
                             error == SpeechRecognizer.ERROR_CLIENT) {
                             Log.w(TAG, "Recoverable critical error, clearing instance")
                             speechRecognizer?.destroy()
@@ -261,6 +261,14 @@ class AndroidSTTProvider(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(
+                RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
+                2000L
+            )
+            putExtra(
+                RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
+                5000L
+            )
         }
 
         try {
@@ -275,7 +283,7 @@ class AndroidSTTProvider(
     override suspend fun stopListening() {
         Log.d(TAG, "stopListening (isEngineRunning=$isEngineRunning)")
         cancelSilenceTimer()
-        
+
         if (isEngineRunning) {
             speechRecognizer?.stopListening()
             isEngineRunning = false
@@ -296,7 +304,7 @@ class AndroidSTTProvider(
         silenceJob?.cancel()
         silenceJob = scope.launch {
             delay(SILENCE_TIMEOUT_MS)
-            
+
             if (isEngineRunning) {
                 Log.d(TAG, "Silence timer reached, stopping recognizer")
                 speechRecognizer?.stopListening()

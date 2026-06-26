@@ -1,4 +1,4 @@
-package com.example.test.qna.tts
+package com.example.test.language.tts
 
 import com.example.test.qna.domain.VoiceResponse
 

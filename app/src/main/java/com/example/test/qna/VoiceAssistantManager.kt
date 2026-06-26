@@ -2,10 +2,10 @@ package com.example.test.qna
 
 import android.util.Log
 import com.example.test.qna.domain.VoiceRequest
-import com.example.test.qna.llm.LLMProvider
-import com.example.test.qna.stt.SpeechToTextProvider
-import com.example.test.qna.stt.STTEvent
-import com.example.test.qna.tts.TextToSpeechProvider
+import com.example.test.language.llm.LLMProvider
+import com.example.test.language.stt.SpeechToTextProvider
+import com.example.test.language.stt.STTEvent
+import com.example.test.language.tts.TextToSpeechProvider
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow

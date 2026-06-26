@@ -1,4 +1,4 @@
-package com.example.test.qna.llm
+package com.example.test.language.llm
 
 import android.util.Log
 import com.example.test.qna.domain.VoiceRequest
@@ -9,6 +9,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 
 class GeminiProvider(
@@ -35,7 +36,7 @@ class GeminiProvider(
         val jsonBody = JSONObject().apply {
 
             put("system_instruction", JSONObject().apply {
-                put("parts", org.json.JSONArray().put(
+                put("parts", JSONArray().put(
                     JSONObject().put(
                         "text",
                         "Bạn là trợ lý giọng nói tiếng Việt. Trả lời tối đa 1-2 câu, ngắn gọn."
@@ -43,9 +44,9 @@ class GeminiProvider(
                 ))
             })
 
-            put("contents", org.json.JSONArray().put(
+            put("contents", JSONArray().put(
                 JSONObject().apply {
-                    put("parts", org.json.JSONArray().put(
+                    put("parts", JSONArray().put(
                         JSONObject().put("text", request.text)
                     ))
                 }

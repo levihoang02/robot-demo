@@ -1,4 +1,4 @@
-package com.example.test.qna.stt
+package com.example.test.language.stt
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
